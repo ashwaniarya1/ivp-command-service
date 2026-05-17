@@ -1,6 +1,7 @@
 package com.bux.ivp.messaging;
 
 import com.bux.ivp.messaging.consumer.CreatePlanCommand;
+import com.bux.ivp.messaging.consumer.DeletePlanCommand;
 import com.bux.ivp.service.PlanCommandService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -31,6 +32,8 @@ public class IvpCommandConsumer {
             switch (type) {
                 case "CREATE_PLAN" -> planCommandService.handleCreatePlan(
                         objectMapper.treeToValue(node, CreatePlanCommand.class));
+                case "DELETE_PLAN" -> planCommandService.handleDeletePlan(
+                        objectMapper.treeToValue(node, DeletePlanCommand.class));
                 default -> log.warn("Unknown command type received: {}", type);
             }
         } catch (Exception e) {

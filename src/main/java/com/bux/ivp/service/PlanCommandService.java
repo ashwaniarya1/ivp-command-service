@@ -3,7 +3,9 @@ package com.bux.ivp.service;
 import com.bux.ivp.domain.InvestmentPlan;
 import com.bux.ivp.domain.PlanInvestment;
 import com.bux.ivp.messaging.consumer.CreatePlanCommand;
+import com.bux.ivp.messaging.consumer.DeletePlanCommand;
 import com.bux.ivp.messaging.producer.PlanCreatedEvent;
+import com.bux.ivp.messaging.producer.PlanDeletedEvent;
 import com.bux.ivp.repository.InvestmentPlanRepository;
 import com.bux.ivp.repository.ProcessedMessageRepository;
 import org.slf4j.Logger;
@@ -14,6 +16,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
+import java.time.Instant;
 import java.util.UUID;
 
 @Service
@@ -73,6 +76,43 @@ public class PlanCommandService {
             public void afterCommit() {
                 kafkaTemplate.send("ivp-events", plan.getId().toString(), event);
                 log.info("PlanCreated event published. planId={}", plan.getId());
+            }
+        });
+    }
+
+    @Transactional
+    public void handleDeletePlan(DeletePlanCommand cmd) {
+        int inserted = processedMessageRepository.insertIfAbsent("DELETE_PLAN", cmd.commandId());
+        if (inserted == 0) {
+            log.info("Duplicate DELETE_PLAN command, skipping. commandId={}", cmd.commandId());
+            return;
+        }
+
+        InvestmentPlan plan = planRepository.findById(cmd.planId()).orElse(null);
+        if (plan == null) {
+            log.warn("Plan not found for DELETE_PLAN. planId={}", cmd.planId());
+            return;
+        }
+
+        if (!plan.isActive()) {
+            log.warn("Plan already deleted, skipping. planId={}", cmd.planId());
+            return;
+        }
+
+        plan.delete();
+        planRepository.save(plan);
+
+        PlanDeletedEvent event = new PlanDeletedEvent(
+                UUID.randomUUID(),
+                plan.getId(),
+                Instant.now()
+        );
+
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                kafkaTemplate.send("ivp-events", plan.getId().toString(), event);
+                log.info("PlanDeleted event published. planId={}", plan.getId());
             }
         });
     }
