@@ -4,7 +4,12 @@ import java.time.Instant;
 import java.util.UUID;
 
 public record PlanDeletedEvent(
+        String type,
         UUID eventId,
         UUID planId,
         Instant occurredAt
-) {}
+) {
+    public PlanDeletedEvent(UUID eventId, UUID planId, Instant occurredAt) {
+        this("PLAN_DELETED", eventId, planId, occurredAt);
+    }
+}
