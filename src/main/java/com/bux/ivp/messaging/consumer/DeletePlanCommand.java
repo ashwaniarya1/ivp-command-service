@@ -1,4 +1,4 @@
-package com.bux.ivp.messaging;
+package com.bux.ivp.messaging.consumer;
 
 import java.util.UUID;
 
