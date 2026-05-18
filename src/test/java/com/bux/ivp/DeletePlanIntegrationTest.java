@@ -61,7 +61,7 @@ class DeletePlanIntegrationTest {
     private ObjectMapper objectMapper;
 
     private KafkaProducer<String, String> producer;
-    private KafkaConsumer<String, String> consumer;
+    private KafkaConsumer<String, String> ivpEventConsumer;
 
     @BeforeEach
     void setUp() {
@@ -75,7 +75,7 @@ class DeletePlanIntegrationTest {
                 ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class
         ));
 
-        consumer = new KafkaConsumer<>(Map.of(
+        ivpEventConsumer = new KafkaConsumer<>(Map.of(
                 ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, kafka.getBootstrapServers(),
                 ConsumerConfig.GROUP_ID_CONFIG, "test-consumer-" + UUID.randomUUID(),
                 ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest",
@@ -83,12 +83,12 @@ class DeletePlanIntegrationTest {
                 ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class
         ));
 
-        consumer.subscribe(List.of("ivp-events"));
+        ivpEventConsumer.subscribe(List.of("ivp-events"));
     }
 
     @AfterEach
     void tearDown() {
-        if (consumer != null) consumer.close();
+        if (ivpEventConsumer != null) ivpEventConsumer.close();
         if (producer != null) producer.close();
     }
 
@@ -117,17 +117,13 @@ class DeletePlanIntegrationTest {
 
     @Test
     void shouldDeletePlanAndPublishEvent() throws Exception {
-        // create a plan first
         String createCommandId = UUID.randomUUID().toString();
         String userId = UUID.randomUUID().toString();
         String planName = "Plan to Delete " + UUID.randomUUID();
 
-        Thread.sleep(2000);
-
         producer.send(new ProducerRecord<>("ivp-commands", createPlan(createCommandId, userId, planName)));
         producer.flush();
 
-        // wait for plan to be created
         await().atMost(Duration.ofSeconds(10)).untilAsserted(() ->
                 assertThat(planRepository.findAll().stream()
                         .filter(p -> p.getName().equals(planName))
@@ -138,21 +134,18 @@ class DeletePlanIntegrationTest {
                 .filter(p -> p.getName().equals(planName))
                 .findFirst().get().getId().toString();
 
-        // now delete it
         String deleteCommandId = UUID.randomUUID().toString();
         producer.send(new ProducerRecord<>("ivp-commands", deletePlan(deleteCommandId, planId)));
         producer.flush();
 
-        // verify plan is deleted in DB
         await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> {
             var plan = planRepository.findById(UUID.fromString(planId));
             assertThat(plan).isPresent();
             assertThat(plan.get().getStatus()).isEqualTo(PlanStatus.DELETED);
         });
 
-        // verify PlanDeleted event published
         await().atMost(Duration.ofSeconds(15)).untilAsserted(() -> {
-            var records = consumer.poll(Duration.ofSeconds(2));
+            var records = ivpEventConsumer.poll(Duration.ofSeconds(2));
             boolean deletedEventFound = false;
             for (var record : records) {
                 var node = objectMapper.readTree(record.value());
@@ -199,7 +192,6 @@ class DeletePlanIntegrationTest {
             assertThat(plan.get().getStatus()).isEqualTo(PlanStatus.DELETED);
         });
 
-        // only one processed_message record for this commandId
         int count = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM processed_message WHERE message_id = ?::uuid",
                 Integer.class, deleteCommandId
@@ -226,7 +218,6 @@ class DeletePlanIntegrationTest {
                 .filter(p -> p.getName().equals(planName))
                 .findFirst().get().getId().toString();
 
-        // delete once
         producer.send(new ProducerRecord<>("ivp-commands", deletePlan(UUID.randomUUID().toString(), planId)));
         producer.flush();
 
@@ -235,14 +226,51 @@ class DeletePlanIntegrationTest {
             assertThat(plan.get().getStatus()).isEqualTo(PlanStatus.DELETED);
         });
 
-        // delete again with different commandId
         producer.send(new ProducerRecord<>("ivp-commands", deletePlan(UUID.randomUUID().toString(), planId)));
         producer.flush();
 
-        // plan should still be DELETED, not errored
-        Thread.sleep(2000);
-        var plan = planRepository.findById(UUID.fromString(planId));
-        assertThat(plan).isPresent();
-        assertThat(plan.get().getStatus()).isEqualTo(PlanStatus.DELETED);
+        await().during(Duration.ofMillis(500)).atMost(Duration.ofSeconds(5)).untilAsserted(() -> {
+            var plan = planRepository.findById(UUID.fromString(planId));
+            assertThat(plan).isPresent();
+            assertThat(plan.get().getStatus()).isEqualTo(PlanStatus.DELETED);
+        });
+    }
+
+    @Test
+    void shouldIgnoreDeletePlanForUnknownPlanId() throws Exception {
+        String commandId = UUID.randomUUID().toString();
+        String unknownPlanId = UUID.randomUUID().toString();
+
+        producer.send(new ProducerRecord<>("ivp-commands", deletePlan(commandId, unknownPlanId)));
+        producer.flush();
+
+        await().atMost(Duration.ofSeconds(5)).untilAsserted(() -> {
+            assertThat(planRepository.findAll()).isEmpty();
+            Integer processed = jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM processed_message WHERE message_id = ?::uuid",
+                    Integer.class, commandId);
+            assertThat(processed).isEqualTo(1);
+        });
+    }
+
+    @Test
+    void shouldIgnoreInvalidDeletePlanWithoutPlanId() throws Exception {
+        String commandId = UUID.randomUUID().toString();
+
+        producer.send(new ProducerRecord<>("ivp-commands", """
+                {
+                    "type": "DELETE_PLAN",
+                    "commandId": "%s"
+                }
+                """.formatted(commandId)));
+        producer.flush();
+
+        await().atMost(Duration.ofSeconds(5)).untilAsserted(() -> {
+            assertThat(planRepository.findAll()).isEmpty();
+            Integer processed = jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM processed_message WHERE message_id = ?::uuid",
+                    Integer.class, commandId);
+            assertThat(processed).isEqualTo(1);
+        });
     }
 }

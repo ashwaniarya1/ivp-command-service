@@ -60,12 +60,12 @@ class CreatePlanIntegrationTest {
     private org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
 
     private KafkaProducer<String, String> producer;
-    private KafkaConsumer<String, String> consumer;
+    private KafkaConsumer<String, String> ivpEventConsumer;
 
     @AfterEach
     void tearDown() {
-        if (consumer != null) {
-            consumer.close();
+        if (ivpEventConsumer != null) {
+            ivpEventConsumer.close();
         }
         if (producer != null) {
             producer.close();
@@ -84,7 +84,7 @@ class CreatePlanIntegrationTest {
                 ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class
         ));
 
-        consumer = new KafkaConsumer<>(Map.of(
+        ivpEventConsumer = new KafkaConsumer<>(Map.of(
                 ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, kafka.getBootstrapServers(),
                 ConsumerConfig.GROUP_ID_CONFIG, "test-consumer-" + UUID.randomUUID(),
                 ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest",
@@ -92,7 +92,7 @@ class CreatePlanIntegrationTest {
                 ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class
         ));
 
-        consumer.subscribe(List.of("ivp-events"));
+        ivpEventConsumer.subscribe(List.of("ivp-events"));
     }
 
     @Test
@@ -100,9 +100,6 @@ class CreatePlanIntegrationTest {
         String commandId = UUID.randomUUID().toString();
         String userId = UUID.randomUUID().toString();
         String uniqueName = "Tech Portfolio " + UUID.randomUUID();
-
-        // wait for consumer to join partition before sending
-        Thread.sleep(2000);
 
         String message = """
             {
@@ -122,7 +119,7 @@ class CreatePlanIntegrationTest {
         producer.flush();
 
         await().atMost(Duration.ofSeconds(15)).untilAsserted(() -> {
-            var records = consumer.poll(Duration.ofSeconds(2));
+            var records = ivpEventConsumer.poll(Duration.ofSeconds(2));
             boolean matchingEventReceived = false;
             for (var record : records) {
                 var node = objectMapper.readTree(record.value());
@@ -130,6 +127,13 @@ class CreatePlanIntegrationTest {
                 var typeNode = node.get("type");
                 if (nameNode != null && uniqueName.equals(nameNode.asText())
                         && typeNode != null && "PLAN_CREATED".equals(typeNode.asText())) {
+                    var investments = node.get("investments");
+                    assertThat(investments).isNotNull();
+                    assertThat(investments.isArray()).isTrue();
+                    assertThat(investments.size()).isEqualTo(2);
+                    var instruments = new java.util.ArrayList<String>();
+                    investments.forEach(i -> instruments.add(i.get("instrument").asText()));
+                    assertThat(instruments).containsExactlyInAnyOrder("AAPL", "GOOGL");
                     matchingEventReceived = true;
                     break;
                 }
@@ -167,22 +171,92 @@ class CreatePlanIntegrationTest {
 
     @Test
     void shouldNotCreatePlanWhenInvestmentsAreEmpty() throws Exception {
+        String commandId = UUID.randomUUID().toString();
+        String planName = "Bad Plan " + UUID.randomUUID();
         String message = """
                 {
                     "type": "CREATE_PLAN",
                     "commandId": "%s",
                     "userId": "%s",
-                    "name": "Bad Plan",
+                    "name": "%s",
                     "investments": [],
                     "executionDay": 1
                 }
-                """.formatted(UUID.randomUUID(), UUID.randomUUID());
+                """.formatted(commandId, UUID.randomUUID(), planName);
 
         producer.send(new ProducerRecord<>("ivp-commands", message));
         producer.flush();
 
-        await().atMost(Duration.ofSeconds(5)).untilAsserted(() ->
-                assertThat(planRepository.findAll()).isEmpty()
-        );
+        await().atMost(Duration.ofSeconds(5)).untilAsserted(() -> {
+            assertThat(planRepository.findAll().stream()
+                    .filter(p -> p.getName().equals(planName))
+                    .toList()).isEmpty();
+            Integer processed = jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM processed_message WHERE message_id = ?::uuid",
+                    Integer.class, commandId);
+            assertThat(processed).isEqualTo(1);
+        });
+    }
+
+    @Test
+    void shouldNotCreatePlanWhenExecutionDayIsInvalid() throws Exception {
+        String commandId = UUID.randomUUID().toString();
+        String planName = "Bad Execution Day " + UUID.randomUUID();
+        String message = """
+                {
+                    "type": "CREATE_PLAN",
+                    "commandId": "%s",
+                    "userId": "%s",
+                    "name": "%s",
+                    "investments": [
+                        {"instrument": "AAPL", "amount": 100.00}
+                    ],
+                    "executionDay": 32
+                }
+                """.formatted(commandId, UUID.randomUUID(), planName);
+
+        producer.send(new ProducerRecord<>("ivp-commands", message));
+        producer.flush();
+
+        await().atMost(Duration.ofSeconds(5)).untilAsserted(() -> {
+            assertThat(planRepository.findAll().stream()
+                    .filter(p -> p.getName().equals(planName))
+                    .toList()).isEmpty();
+            Integer processed = jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM processed_message WHERE message_id = ?::uuid",
+                    Integer.class, commandId);
+            assertThat(processed).isEqualTo(1);
+        });
+    }
+
+    @Test
+    void shouldNotCreatePlanWhenAmountIsNotPositive() throws Exception {
+        String commandId = UUID.randomUUID().toString();
+        String planName = "Bad Amount " + UUID.randomUUID();
+        String message = """
+                {
+                    "type": "CREATE_PLAN",
+                    "commandId": "%s",
+                    "userId": "%s",
+                    "name": "%s",
+                    "investments": [
+                        {"instrument": "AAPL", "amount": -1.00}
+                    ],
+                    "executionDay": 1
+                }
+                """.formatted(commandId, UUID.randomUUID(), planName);
+
+        producer.send(new ProducerRecord<>("ivp-commands", message));
+        producer.flush();
+
+        await().atMost(Duration.ofSeconds(5)).untilAsserted(() -> {
+            assertThat(planRepository.findAll().stream()
+                    .filter(p -> p.getName().equals(planName))
+                    .toList()).isEmpty();
+            Integer processed = jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM processed_message WHERE message_id = ?::uuid",
+                    Integer.class, commandId);
+            assertThat(processed).isEqualTo(1);
+        });
     }
 }
