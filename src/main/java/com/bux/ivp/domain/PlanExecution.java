@@ -1,12 +1,10 @@
 package com.bux.ivp.domain;
 
 import jakarta.persistence.*;
-import lombok.Getter;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.UUID;
 
-@Getter
 @Entity
 @Table(name = "plan_execution",
         uniqueConstraints = @UniqueConstraint(columnNames = {"plan_id", "execution_date"}))
@@ -43,5 +41,39 @@ public class PlanExecution {
         execution.status = ExecutionStatus.STARTED;
         execution.createdAt = Instant.now();
         return execution;
+    }
+
+    public void complete(ExecutionResult result) {
+        this.status = ExecutionStatus.COMPLETED;
+        this.result = result;
+        this.completedAt = Instant.now();
+    }
+
+    public UUID getId() {
+        return id;
+    }
+
+    public UUID getPlanId() {
+        return planId;
+    }
+
+    public LocalDate getExecutionDate() {
+        return executionDate;
+    }
+
+    public ExecutionStatus getStatus() {
+        return status;
+    }
+
+    public ExecutionResult getResult() {
+        return result;
+    }
+
+    public Instant getCreatedAt() {
+        return createdAt;
+    }
+
+    public Instant getCompletedAt() {
+        return completedAt;
     }
 }

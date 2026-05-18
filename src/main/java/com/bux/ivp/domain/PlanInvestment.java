@@ -1,11 +1,9 @@
 package com.bux.ivp.domain;
 
 import jakarta.persistence.*;
-import lombok.Getter;
 import java.math.BigDecimal;
 import java.util.UUID;
 
-@Getter
 @Entity
 @Table(name = "plan_investment")
 public class PlanInvestment {
@@ -32,5 +30,21 @@ public class PlanInvestment {
         investment.instrument = instrument;
         investment.amount = amount;
         return investment;
+    }
+
+    public UUID getId() {
+        return id;
+    }
+
+    public InvestmentPlan getPlan() {
+        return plan;
+    }
+
+    public String getInstrument() {
+        return instrument;
+    }
+
+    public BigDecimal getAmount() {
+        return amount;
     }
 }

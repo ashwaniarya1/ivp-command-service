@@ -1,13 +1,13 @@
 package com.bux.ivp.domain;
 
 import jakarta.persistence.*;
-import lombok.Getter;
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
 
-@Getter
 @Entity
 @Table(name = "investment_plan")
 public class InvestmentPlan {
@@ -52,6 +52,42 @@ public class InvestmentPlan {
     public void delete() {
         this.status = PlanStatus.DELETED;
         this.deletedAt = Instant.now();
+    }
+
+    public void addInvestment(String instrument, BigDecimal amount) {
+        investments.add(PlanInvestment.create(this, instrument, amount));
+    }
+
+    public UUID getId() {
+        return id;
+    }
+
+    public UUID getUserId() {
+        return userId;
+    }
+
+    public String getName() {
+        return name;
+    }
+
+    public int getExecutionDay() {
+        return executionDay;
+    }
+
+    public PlanStatus getStatus() {
+        return status;
+    }
+
+    public Instant getCreatedAt() {
+        return createdAt;
+    }
+
+    public Instant getDeletedAt() {
+        return deletedAt;
+    }
+
+    public List<PlanInvestment> getInvestments() {
+        return Collections.unmodifiableList(investments);
     }
 
     public boolean isActive() {

@@ -10,7 +10,7 @@ import java.util.UUID;
 
 public interface ProcessedMessageRepository extends JpaRepository<ProcessedMessage, ProcessedMessageId> {
 
-    @Modifying
+    @Modifying(clearAutomatically = true)
     @Query(value = """
             INSERT INTO processed_message(message_type, message_id, processed_at)
             VALUES (:type, :id, now())

@@ -1,12 +1,10 @@
 package com.bux.ivp.domain;
 
 import jakarta.persistence.*;
-import lombok.Getter;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
 
-@Getter
 @Entity
 @Table(name = "plan_order")
 public class PlanOrder {
@@ -68,5 +66,45 @@ public class PlanOrder {
 
     public boolean isTerminal() {
         return this.status == OrderStatus.FILLED || this.status == OrderStatus.REJECTED;
+    }
+
+    public UUID getId() {
+        return id;
+    }
+
+    public UUID getOrderId() {
+        return orderId;
+    }
+
+    public UUID getExecutionId() {
+        return executionId;
+    }
+
+    public UUID getPlanId() {
+        return planId;
+    }
+
+    public String getInstrument() {
+        return instrument;
+    }
+
+    public BigDecimal getAmount() {
+        return amount;
+    }
+
+    public OrderStatus getStatus() {
+        return status;
+    }
+
+    public String getFailureReason() {
+        return failureReason;
+    }
+
+    public Instant getCreatedAt() {
+        return createdAt;
+    }
+
+    public Instant getCompletedAt() {
+        return completedAt;
     }
 }
